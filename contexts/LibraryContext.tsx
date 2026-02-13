@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { LibraryItem, LibraryFolder } from '../types';
-import { db } from '../config/firebase';
+import { db, storage } from '../config/firebase';
 import { useAuth } from './AuthContext';
 import { 
   collection, 
@@ -9,17 +9,17 @@ import {
   doc, 
   onSnapshot, 
   query, 
-  orderBy,
-  where
+  orderBy
 } from 'firebase/firestore';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 
 interface LibraryContextType {
   items: LibraryItem[];
   folders: LibraryFolder[];
-  addItem: (item: Omit<LibraryItem, 'id' | 'timestamp'>) => void;
+  addItem: (item: Omit<LibraryItem, 'id' | 'timestamp'>) => Promise<void>;
   removeItem: (id: string) => void;
   clearLibrary: () => void;
-  createFolder: (name: string, brandId?: string) => void;
+  createFolder: (name: string, brandId?: string) => Promise<void>;
   deleteFolder: (id: string) => void;
 }
 
@@ -38,49 +38,85 @@ export const LibraryProvider = ({ children }: { children?: React.ReactNode }) =>
       return;
     }
 
-    // Subscribe to Items
-    const itemsQuery = query(
-      collection(db, 'users', user.uid, 'library'),
-      orderBy('timestamp', 'desc')
-    );
-    
-    const unsubscribeItems = onSnapshot(itemsQuery, (snapshot) => {
-      const loadedItems = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as LibraryItem[];
-      setItems(loadedItems);
-    });
-
-    // Subscribe to Folders
-    const foldersQuery = query(
-      collection(db, 'users', user.uid, 'folders'),
-      orderBy('createdAt', 'desc')
-    );
-
-    const unsubscribeFolders = onSnapshot(foldersQuery, (snapshot) => {
-        const loadedFolders = snapshot.docs.map(doc => ({
+    try {
+        // Subscribe to Items
+        const itemsQuery = query(
+        collection(db, 'users', user.uid, 'library'),
+        orderBy('timestamp', 'desc')
+        );
+        
+        const unsubscribeItems = onSnapshot(itemsQuery, (snapshot) => {
+        const loadedItems = snapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data()
-        })) as LibraryFolder[];
-        setFolders(loadedFolders);
-    });
+        })) as LibraryItem[];
+        setItems(loadedItems);
+        }, (err) => {
+            console.error("Library Subscription Error:", err);
+        });
 
-    return () => {
-      unsubscribeItems();
-      unsubscribeFolders();
-    };
+        // Subscribe to Folders
+        const foldersQuery = query(
+        collection(db, 'users', user.uid, 'folders'),
+        orderBy('createdAt', 'desc')
+        );
+
+        const unsubscribeFolders = onSnapshot(foldersQuery, (snapshot) => {
+            const loadedFolders = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            })) as LibraryFolder[];
+            setFolders(loadedFolders);
+        }, (err) => {
+            console.error("Folder Subscription Error:", err);
+        });
+
+        return () => {
+        unsubscribeItems();
+        unsubscribeFolders();
+        };
+    } catch (e) {
+        console.error("Error setting up listeners", e);
+    }
   }, [user]);
 
   const addItem = async (itemData: Omit<LibraryItem, 'id' | 'timestamp'>) => {
-    if (!user) return;
+    if (!user) {
+        console.error("Cannot add item: No user logged in");
+        return;
+    }
+
+    let finalImageUrl = itemData.imageUrl;
+
+    // Handle Image Upload to Storage if Base64
+    if (finalImageUrl && finalImageUrl.startsWith('data:')) {
+        try {
+            const fileName = `library/${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
+            const storageRef = ref(storage, `users/${user.uid}/${fileName}`);
+            
+            // Upload
+            await uploadString(storageRef, finalImageUrl, 'data_url');
+            
+            // Get URL
+            finalImageUrl = await getDownloadURL(storageRef);
+        } catch (storageError) {
+            console.error("Error uploading to storage:", storageError);
+            // Fallback: try to save keeping null if upload fails to avoid firestore crash
+            // or keep base64 if small (risk)
+        }
+    }
+
     try {
       await addDoc(collection(db, 'users', user.uid, 'library'), {
         ...itemData,
+        imageUrl: finalImageUrl,
         timestamp: Date.now()
       });
     } catch (error) {
-      console.error("Error adding document: ", error);
+      console.error("Error adding document to library: ", error);
+      if (error.toString().includes("exceeded")) {
+          alert("Erro: O item é muito grande para salvar. Tente uma imagem menor.");
+      }
     }
   };
 
@@ -95,22 +131,25 @@ export const LibraryProvider = ({ children }: { children?: React.ReactNode }) =>
 
   const clearLibrary = async () => {
     if (!user) return;
-    // Batch delete is recommended for production but loop is fine for small scale/MVP
     items.forEach(async (item) => {
         await removeItem(item.id);
     });
   };
 
   const createFolder = async (name: string, brandId?: string) => {
-    if (!user) return;
+    if (!user) {
+        console.error("Cannot create folder: User not logged in");
+        return;
+    }
     try {
         await addDoc(collection(db, 'users', user.uid, 'folders'), {
             name,
-            brandId,
+            brandId: brandId || null,
             createdAt: Date.now()
         });
     } catch (error) {
-        console.error("Error creating folder: ", error);
+        console.error("Error creating folder in Firestore: ", error);
+        throw error; // Re-throw to UI
     }
   };
 

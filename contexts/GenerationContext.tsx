@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { generatePostContent, generateVeoVideo, generateVideoCaption, generateImageCaption, GeneratedContent } from '../services/gemini';
 import { useLibrary } from './LibraryContext';
@@ -132,7 +131,19 @@ export function GenerationProvider({ children }: { children?: ReactNode }) {
          // Caption Mode
          if (!currentImage) throw new Error("Image Required for Caption Mode");
          const data = await generateImageCaption(currentImage, currentPrompt);
-         addItem({ ...data, brandName: brand.name, brandColor: brand.colors.primary, platformId: platform.id, personaId: persona.id, folderId: targetFolderId, imageSearchTerm: data.imagePrompt, imageUrl: data.generatedImageUrl });
+         
+         // Blocking save to library
+         await addItem({ 
+             ...data, 
+             brandName: brand.name, 
+             brandColor: brand.colors.primary, 
+             platformId: platform.id, 
+             personaId: persona.id, 
+             folderId: targetFolderId, 
+             imageSearchTerm: data.imagePrompt, 
+             imageUrl: data.generatedImageUrl 
+         });
+
          const newPost: SessionPost = { ...data, id: crypto.randomUUID(), timestamp: Date.now() };
          setSessionCaptions(prev => [newPost, ...prev]);
 
@@ -140,11 +151,24 @@ export function GenerationProvider({ children }: { children?: ReactNode }) {
         // Post Mode
         const fullPrompt = `MARCA: ${brand.name}. PERSONA: ${persona.label}. ESTILO: ${style}. PEDIDO: ${currentPrompt}`;
         const data = await generatePostContent(fullPrompt, currentImage);
-        addItem({ ...data, brandName: brand.name, brandColor: brand.colors.primary, platformId: platform.id, personaId: persona.id, folderId: targetFolderId, imageSearchTerm: data.imagePrompt, imageUrl: data.generatedImageUrl });
+        
+        // Blocking save to library to ensure image upload completes
+        await addItem({ 
+            ...data, 
+            brandName: brand.name, 
+            brandColor: brand.colors.primary, 
+            platformId: platform.id, 
+            personaId: persona.id, 
+            folderId: targetFolderId, 
+            imageSearchTerm: data.imagePrompt, 
+            imageUrl: data.generatedImageUrl 
+        });
+
         const newPost: SessionPost = { ...data, id: crypto.randomUUID(), timestamp: Date.now() };
         setSessionPosts(prev => [newPost, ...prev]);
       }
     } catch (error) {
+      console.error("Generation failed", error);
       setPrompt(currentPrompt); 
       setAttachedImage(currentImage);
       throw error;

@@ -2,6 +2,7 @@ import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAFRyyJiA4ejD7MRCz-YFL3JIQE7rx2WZw",
@@ -15,8 +16,20 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+
+// Initialize Auth & Firestore
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
-export { app, auth, db, analytics };
+// Initialize Analytics (Safe Mode)
+// Wrap in try-catch because getAnalytics can fail if the component isn't registered correctly 
+// due to version mismatches or if ad-blockers block the call.
+let analytics = null;
+try {
+  analytics = getAnalytics(app);
+} catch (error) {
+  console.warn("Firebase Analytics failed to initialize:", error);
+}
+
+export { app, auth, db, storage, analytics };

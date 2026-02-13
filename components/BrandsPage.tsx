@@ -1,7 +1,6 @@
-
 import React, { useRef, useState } from 'react';
 import { useBrand, Brand } from '../contexts/BrandContext';
-import { Upload, Trash2, Palette, Type, CheckCircle2, Save, Check, Plus, AlertCircle, Info, Briefcase, LayoutGrid, Star } from 'lucide-react';
+import { Upload, Trash2, Palette, Type, CheckCircle2, Save, Check, Plus, AlertCircle, Info, Briefcase, LayoutGrid, Star, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export const BrandsPage: React.FC = () => {
@@ -11,21 +10,13 @@ export const BrandsPage: React.FC = () => {
     activateBrand, 
     addBrand, 
     removeBrand, 
-    updateBrand, 
-    saveBrandSettings, 
-    isDirty 
+    updateBrand
   } = useBrand();
 
-  const [showSuccess, setShowSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Fallback seguro se não houver marca carregada ainda
   const editingBrand = brands.find(b => b.id === activeBrandId) || brands[0];
-
-  const handleSave = () => {
-    saveBrandSettings();
-    setShowSuccess(true);
-    setTimeout(() => setShowSuccess(false), 3000);
-  };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -37,6 +28,7 @@ export const BrandsPage: React.FC = () => {
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64 = reader.result as string;
+        // Atualização direta no Firestore
         updateBrand(editingBrand.id, {
           savedLogos: [base64, ...editingBrand.savedLogos],
           logo: editingBrand.logo || base64
@@ -59,7 +51,6 @@ export const BrandsPage: React.FC = () => {
   };
 
   const handleDeleteBrand = (e: React.MouseEvent, id: string) => {
-    // Para a propagação para evitar que o clique no botão ative a marca ao mesmo tempo que deleta
     e.preventDefault();
     e.stopPropagation();
     
@@ -80,42 +71,27 @@ export const BrandsPage: React.FC = () => {
     });
   };
 
+  if (!editingBrand) {
+      return (
+          <div className="flex h-full items-center justify-center text-slate-500 gap-3">
+              <Loader2 className="animate-spin" /> Carregando Marcas...
+          </div>
+      );
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto h-full flex flex-col gap-6 overflow-hidden">
       
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 shrink-0">
         <div className="space-y-2">
           <h2 className="text-3xl font-brand font-extrabold text-white tracking-tight uppercase">Minhas Marcas</h2>
-          <p className="text-slate-400">Gerencie múltiplos clientes e identidades visuais.</p>
+          <p className="text-slate-400">Gerencie múltiplos clientes. Alterações são salvas automaticamente.</p>
         </div>
 
-        <button
-          onClick={handleSave}
-          disabled={!isDirty}
-          className={`flex items-center gap-3 px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-xl ${
-            isDirty 
-            ? 'bg-cyber-electric text-cyber-dark hover:bg-cyber-electric/90 shadow-cyber-electric/20 active:scale-95' 
-            : 'bg-white/5 text-slate-500 cursor-not-allowed border border-white/5'
-          }`}
-        >
-          <Save size={18} />
-          Salvar Tudo
-        </button>
+        <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-[10px] text-emerald-400 font-bold uppercase tracking-widest">
+            <CheckCircle2 size={12} /> Autosave Ativo
+        </div>
       </header>
-
-      <AnimatePresence>
-        {showSuccess && (
-          <motion.div 
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center gap-3 text-emerald-400 text-xs font-black uppercase tracking-widest shrink-0"
-          >
-            <CheckCircle2 size={16} />
-            Configurações salvas com sucesso!
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 overflow-hidden min-h-0 pb-10">
         
@@ -153,7 +129,7 @@ export const BrandsPage: React.FC = () => {
                       {brand.logo ? (
                         <img src={brand.logo} className="w-full h-full object-contain" alt="logo" />
                       ) : (
-                        <span className="text-xs font-bold text-slate-500">{brand.name.substring(0, 2).toUpperCase()}</span>
+                        <span className="text-xs font-bold text-slate-500">{brand.name ? brand.name.substring(0, 2).toUpperCase() : '??'}</span>
                       )}
                     </div>
                     <div>
@@ -161,7 +137,7 @@ export const BrandsPage: React.FC = () => {
                         {brand.name}
                       </h4>
                       <p className="text-[9px] text-slate-500 uppercase tracking-wider mt-0.5">
-                        {brand.savedLogos.length} Variações
+                        {brand.savedLogos?.length || 0} Variações
                       </p>
                     </div>
                   </div>
@@ -179,7 +155,6 @@ export const BrandsPage: React.FC = () => {
                     <div className="h-1.5 w-4 rounded-full" style={{ backgroundColor: brand.colors.accent }} />
                 </div>
 
-                {/* Botão de Apagar: Z-Index aumentado e Opacity ajustada */}
                 {brands.length > 1 && (
                     <button 
                        onClick={(e) => handleDeleteBrand(e, brand.id)}
@@ -273,7 +248,7 @@ export const BrandsPage: React.FC = () => {
                   </div>
                 </div>
 
-                {editingBrand.savedLogos.length === 0 ? (
+                {!editingBrand.savedLogos || editingBrand.savedLogos.length === 0 ? (
                   <div className="py-8 flex flex-col items-center justify-center text-slate-600 space-y-3 border-2 border-dashed border-white/5 rounded-2xl bg-white/[0.01]">
                     <Upload size={24} />
                     <p className="text-xs font-bold uppercase tracking-widest">Nenhuma logo enviada para esta marca</p>

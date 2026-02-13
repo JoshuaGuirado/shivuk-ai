@@ -1,5 +1,17 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { db, storage } from '../config/firebase';
+import { useAuth } from './AuthContext';
+import { 
+  collection, 
+  addDoc, 
+  deleteDoc, 
+  updateDoc, 
+  doc, 
+  onSnapshot, 
+  query, 
+  orderBy
+} from 'firebase/firestore';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 
 interface BrandColors {
   primary: string;
@@ -11,34 +23,30 @@ export interface Brand {
   id: string;
   name: string;
   colors: BrandColors;
-  logo: string | null; // Logo ativa
-  savedLogos: string[]; // Coleção de logos deste cliente
+  logo: string | null;
+  savedLogos: string[];
 }
 
 interface BrandContextType {
-  brands: Brand[]; // Lista de todas as marcas
-  activeBrandId: string; // ID da marca sendo usada no momento
-  brand: Brand; // Getter de conveniência para a marca ativa (para componentes consumidores)
+  brands: Brand[];
+  activeBrandId: string;
+  brand: Brand;
   
   activateBrand: (id: string) => void;
   addBrand: () => void;
   removeBrand: (id: string) => void;
   updateBrand: (id: string, updates: Partial<Brand>) => void;
   
-  saveBrandSettings: () => void;
-  isDirty: boolean;
+  isDirty: boolean; // Mantido para compatibilidade, mas sempre false no modo Firestore realtime
 }
 
-const DEFAULT_BRAND_ID = 'default-brand';
+const DEFAULT_BRAND_ID = 'default-brand-placeholder';
 
-const DEFAULT_BRAND: Brand = {
+// Fallback brand visual enquanto carrega
+const LOADING_BRAND: Brand = {
   id: DEFAULT_BRAND_ID,
-  name: 'Cliente Principal',
-  colors: {
-    primary: '#F1B701',
-    secondary: '#F8851A',
-    accent: '#FFB020',
-  },
+  name: 'Carregando...',
+  colors: { primary: '#333', secondary: '#444', accent: '#555' },
   logo: null,
   savedLogos: [],
 };
@@ -46,117 +54,135 @@ const DEFAULT_BRAND: Brand = {
 const BrandContext = createContext<BrandContextType | undefined>(undefined);
 
 export const BrandProvider = ({ children }: { children?: React.ReactNode }) => {
-  // Inicialização de Estado com Migração de Dados Antigos
-  const [brands, setBrands] = useState<Brand[]>(() => {
-    if (typeof window === 'undefined') return [DEFAULT_BRAND];
-    
-    const saved = localStorage.getItem('shivuk_brands_v2');
-    
-    // Se já existe o formato V2 (Array), usa ele
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) { console.error(e); }
+  const { user } = useAuth();
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [activeBrandId, setActiveBrandId] = useState<string>('');
+
+  // 1. Subscribe to Firestore
+  useEffect(() => {
+    if (!user) {
+      setBrands([]);
+      return;
     }
 
-    // Se não, tenta migrar o formato V1 (Objeto único)
-    const oldSaved = localStorage.getItem('shivuk_brand');
-    if (oldSaved) {
-      try {
-        const parsedOld = JSON.parse(oldSaved);
-        // Adapta o objeto antigo para o novo formato com ID
-        const migratedBrand: Brand = {
-          ...DEFAULT_BRAND,
-          ...parsedOld,
-          id: DEFAULT_BRAND_ID
-        };
-        // Garante a estrutura de cores antiga
-        if ((parsedOld as any).color) {
-            migratedBrand.colors.primary = (parsedOld as any).color;
+    const q = query(collection(db, 'users', user.uid, 'brands'));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loadedBrands = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Brand[];
+
+      // Se não tiver nenhuma marca no banco, cria a padrão automaticamente
+      if (loadedBrands.length === 0) {
+        createDefaultBrand(user.uid);
+      } else {
+        setBrands(loadedBrands);
+        // Se a marca ativa não estiver na lista (ou vazia), seleciona a primeira
+        if (!activeBrandId || !loadedBrands.find(b => b.id === activeBrandId)) {
+           const savedId = localStorage.getItem('shivuk_active_brand_id');
+           if (savedId && loadedBrands.find(b => b.id === savedId)) {
+             setActiveBrandId(savedId);
+           } else {
+             setActiveBrandId(loadedBrands[0].id);
+           }
         }
-        return [migratedBrand];
-      } catch (e) { console.error(e); }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const createDefaultBrand = async (uid: string) => {
+    try {
+        await addDoc(collection(db, 'users', uid, 'brands'), {
+            name: 'Minha Marca',
+            colors: {
+                primary: '#F1B701',
+                secondary: '#F8851A',
+                accent: '#FFB020',
+            },
+            logo: null,
+            savedLogos: []
+        });
+    } catch (e) {
+        console.error("Erro ao criar marca padrão", e);
     }
+  };
 
-    return [DEFAULT_BRAND];
-  });
-
-  const [activeBrandId, setActiveBrandId] = useState<string>(() => {
-    return localStorage.getItem('shivuk_active_brand_id') || (brands[0]?.id || DEFAULT_BRAND_ID);
-  });
-
-  const [isDirty, setIsDirty] = useState(false);
-
-  // Helper para pegar a marca ativa atual
-  const activeBrand = brands.find(b => b.id === activeBrandId) || brands[0] || DEFAULT_BRAND;
+  const activeBrand = brands.find(b => b.id === activeBrandId) || brands[0] || LOADING_BRAND;
 
   const activateBrand = (id: string) => {
     setActiveBrandId(id);
     localStorage.setItem('shivuk_active_brand_id', id);
   };
 
-  const addBrand = () => {
-    const newId = crypto.randomUUID();
-    const newBrand: Brand = {
-      id: newId,
-      name: 'Novo Cliente',
-      colors: { ...DEFAULT_BRAND.colors },
-      logo: null,
-      savedLogos: []
-    };
-    const updatedBrands = [...brands, newBrand];
-    
-    setBrands(updatedBrands);
-    setActiveBrandId(newId);
-    
-    // Auto-Save para criação (UX Melhor)
-    localStorage.setItem('shivuk_brands_v2', JSON.stringify(updatedBrands));
-    localStorage.setItem('shivuk_active_brand_id', newId);
+  const addBrand = async () => {
+    if (!user) return;
+    try {
+        const docRef = await addDoc(collection(db, 'users', user.uid, 'brands'), {
+            name: 'Nova Marca',
+            colors: {
+                primary: '#000000',
+                secondary: '#333333',
+                accent: '#666666',
+            },
+            logo: null,
+            savedLogos: []
+        });
+        activateBrand(docRef.id);
+    } catch (error) {
+        console.error("Error adding brand: ", error);
+    }
   };
 
-  const removeBrand = (idToDelete: string) => {
-    // 1. Validação de Segurança
+  const removeBrand = async (idToDelete: string) => {
+    if (!user) return;
     if (brands.length <= 1) {
       alert("Você precisa ter pelo menos um cliente na carteira.");
       return;
     }
-
-    // 2. Filtra a lista removendo o ID alvo
-    const updatedBrands = brands.filter(b => b.id !== idToDelete);
-    
-    // 3. Determina qual será o novo ID ativo se apagarmos o atual
-    let nextActiveId = activeBrandId;
-    if (idToDelete === activeBrandId) {
-      // Se apagou o ativo, seleciona o primeiro da nova lista
-      nextActiveId = updatedBrands[0].id;
+    try {
+        await deleteDoc(doc(db, 'users', user.uid, 'brands', idToDelete));
+        // A atualização do estado activeBrandId acontece via useEffect quando o snapshot mudar
+    } catch (error) {
+        console.error("Error removing brand: ", error);
     }
-
-    // 4. Atualiza Estados
-    setBrands(updatedBrands);
-    setActiveBrandId(nextActiveId);
-    
-    // 5. Persistência Imediata (O "Banco de Dados")
-    localStorage.setItem('shivuk_brands_v2', JSON.stringify(updatedBrands));
-    localStorage.setItem('shivuk_active_brand_id', nextActiveId);
-    
-    // Reseta estado de "sujo" pois acabamos de salvar
-    setIsDirty(false); 
   };
 
-  const updateBrand = (id: string, updates: Partial<Brand>) => {
-    setBrands(prev => prev.map(b => {
-      if (b.id === id) {
-        return { ...b, ...updates };
-      }
-      return b;
-    }));
-    setIsDirty(true);
-  };
+  const updateBrand = async (id: string, updates: Partial<Brand>) => {
+    if (!user) return;
+    
+    // Logic to handle image uploads for 'logo' and 'savedLogos'
+    const finalUpdates = { ...updates };
+    
+    try {
+        // Upload logo if base64
+        if (finalUpdates.logo && finalUpdates.logo.startsWith('data:')) {
+             const logoRef = ref(storage, `users/${user.uid}/brands/${id}/logo_${Date.now()}.png`);
+             await uploadString(logoRef, finalUpdates.logo, 'data_url');
+             finalUpdates.logo = await getDownloadURL(logoRef);
+        }
 
-  const saveBrandSettings = () => {
-    localStorage.setItem('shivuk_brands_v2', JSON.stringify(brands));
-    localStorage.setItem('shivuk_active_brand_id', activeBrandId);
-    setIsDirty(false);
+        // Upload savedLogos items if they are base64
+        // Note: This logic assumes new logos are added to the beginning of the array as per BrandsPage.tsx
+        if (finalUpdates.savedLogos && finalUpdates.savedLogos.length > 0) {
+             const newSavedLogos = await Promise.all(finalUpdates.savedLogos.map(async (logoStr) => {
+                 if (logoStr.startsWith('data:')) {
+                     const logoRef = ref(storage, `users/${user.uid}/brands/${id}/saved_${Date.now()}_${Math.random().toString(36).substr(2,5)}.png`);
+                     await uploadString(logoRef, logoStr, 'data_url');
+                     return await getDownloadURL(logoRef);
+                 }
+                 return logoStr; // Already a URL
+             }));
+             finalUpdates.savedLogos = newSavedLogos;
+        }
+
+        // Firestore update
+        await updateDoc(doc(db, 'users', user.uid, 'brands', id), finalUpdates);
+    } catch (error) {
+        console.error("Error updating brand: ", error);
+    }
   };
 
   return (
@@ -168,8 +194,7 @@ export const BrandProvider = ({ children }: { children?: React.ReactNode }) => {
       addBrand,
       removeBrand,
       updateBrand,
-      saveBrandSettings, 
-      isDirty 
+      isDirty: false // Firestore is realtime, no dirty state needed
     }}>
       {children}
     </BrandContext.Provider>
