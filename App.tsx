@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { MainChat } from './components/MainChat';
@@ -10,33 +9,22 @@ import { TemplatesPage } from './components/TemplatesPage';
 import { AboutPage } from './components/AboutPage';
 import { ProfilePage } from './components/ProfilePage';
 import { SettingsPage } from './components/SettingsPage';
-import { PlansPage } from './components/PlansPage'; // Novo Import
+import { PlansPage } from './components/PlansPage'; 
 import { View } from './types';
 import { AnimatePresence, motion } from 'framer-motion';
 import { BrandProvider } from './contexts/BrandContext';
 import { LibraryProvider } from './contexts/LibraryContext';
 import { SettingsProvider, useSettings } from './contexts/SettingsContext';
 import { GenerationProvider } from './contexts/GenerationContext';
-import { Menu } from 'lucide-react';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { Menu, Loader2 } from 'lucide-react';
 
 const AppContent: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem('shivuk_logged_in') === 'true';
-  });
+  const { user, loading, logout } = useAuth();
   const [currentView, setCurrentView] = useState<View>(View.CHAT);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const { t } = useSettings();
-
-  const handleLogin = () => {
-    localStorage.setItem('shivuk_logged_in', 'true');
-    setIsAuthenticated(true);
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('shivuk_logged_in');
-    setIsAuthenticated(false);
-  };
 
   const handleSelectTemplate = (prompt: string) => {
     setPendingPrompt(prompt);
@@ -73,8 +61,16 @@ const AppContent: React.FC = () => {
     }
   };
 
-  if (!isAuthenticated) {
-    return <LoginPage onLogin={handleLogin} />;
+  if (loading) {
+    return (
+      <div className="h-screen w-full bg-cyber-dark flex items-center justify-center">
+         <Loader2 size={40} className="text-cyber-electric animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
   }
 
   const getTitle = (view: View) => {
@@ -94,14 +90,11 @@ const AppContent: React.FC = () => {
   };
 
   return (
-    // MAIN CONTAINER: 
-    // Light Mode: bg-cyber-light (White), text-cyber-green (Dark Green)
-    // Dark Mode: bg-cyber-dark (Deep Green), text-white (Pure White)
     <div className="flex h-screen w-full bg-cyber-light dark:bg-cyber-dark text-cyber-green dark:text-white overflow-hidden font-sans transition-colors duration-300">
       <Sidebar 
         activeView={currentView} 
         onViewChange={setCurrentView} 
-        onLogout={handleLogout} 
+        onLogout={logout} 
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
       />
@@ -122,14 +115,14 @@ const AppContent: React.FC = () => {
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
-              <p className="text-xs font-bold text-cyber-green dark:text-white leading-none">{t.header?.role || 'Diretor Criativo'}</p>
+              <p className="text-xs font-bold text-cyber-green dark:text-white leading-none">{user.displayName || user.email?.split('@')[0] || t.header?.role}</p>
               <p className="text-[10px] text-slate-500 uppercase tracking-tighter">{t.header?.account || 'Conta Pro'}</p>
             </div>
             <div 
               onClick={() => setCurrentView(View.PROFILE)}
               className="w-9 h-9 rounded-full bg-gradient-to-tr from-cyber-green to-cyber-dark flex items-center justify-center text-xs font-bold border border-cyber-beige/30 cursor-pointer hover:ring-2 ring-cyber-beige transition-all shadow-lg shadow-cyber-green/10 overflow-hidden text-white"
             >
-               <ProfileSmallAvatar />
+               {user.photoURL ? <img src={user.photoURL} alt="User" className="w-full h-full object-cover" /> : <ProfileSmallAvatar />}
             </div>
           </div>
         </header>
@@ -163,13 +156,6 @@ const ProfileSmallAvatar: React.FC = () => {
       setAvatar(individual);
       return;
     }
-    const saved = localStorage.getItem('shivuk_user_profile');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setAvatar(parsed.avatar);
-      } catch (e) {}
-    }
   };
 
   useEffect(() => {
@@ -179,20 +165,22 @@ const ProfileSmallAvatar: React.FC = () => {
   }, []);
 
   if (avatar) return <img src={avatar} className="w-full h-full object-cover" />;
-  return <span className="text-white">JD</span>;
+  return <span className="text-white">US</span>;
 };
 
 const App: React.FC = () => {
   return (
-    <SettingsProvider>
-      <BrandProvider>
-        <LibraryProvider>
-          <GenerationProvider>
-            <AppContent />
-          </GenerationProvider>
-        </LibraryProvider>
-      </BrandProvider>
-    </SettingsProvider>
+    <AuthProvider>
+      <SettingsProvider>
+        <BrandProvider>
+          <LibraryProvider>
+            <GenerationProvider>
+              <AppContent />
+            </GenerationProvider>
+          </LibraryProvider>
+        </BrandProvider>
+      </SettingsProvider>
+    </AuthProvider>
   );
 };
 

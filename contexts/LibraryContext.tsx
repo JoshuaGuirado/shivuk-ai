@@ -1,6 +1,17 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { LibraryItem, LibraryFolder } from '../types';
+import { db } from '../config/firebase';
+import { useAuth } from './AuthContext';
+import { 
+  collection, 
+  addDoc, 
+  deleteDoc, 
+  doc, 
+  onSnapshot, 
+  query, 
+  orderBy,
+  where
+} from 'firebase/firestore';
 
 interface LibraryContextType {
   items: LibraryItem[];
@@ -12,94 +23,104 @@ interface LibraryContextType {
   deleteFolder: (id: string) => void;
 }
 
-const DEFAULT_ITEMS: LibraryItem[] = [];
-const DEFAULT_FOLDERS: LibraryFolder[] = [];
-
 const LibraryContext = createContext<LibraryContextType | undefined>(undefined);
 
 export const LibraryProvider = ({ children }: { children?: React.ReactNode }) => {
+  const { user } = useAuth();
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
 
-  // Load Items
+  // Subscribe to Firestore Collections when user logs in
   useEffect(() => {
-    const saved = localStorage.getItem('shivuk_library');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        setItems(parsed);
-      } catch (e) {
-        console.error("Failed to load library", e);
-      }
-    } else {
-      setItems(DEFAULT_ITEMS);
-      localStorage.setItem('shivuk_library', JSON.stringify(DEFAULT_ITEMS));
+    if (!user) {
+      setItems([]);
+      setFolders([]);
+      return;
     }
-  }, []);
 
-  // Load Folders
-  useEffect(() => {
-    const savedFolders = localStorage.getItem('shivuk_library_folders');
-    if (savedFolders) {
-      try {
-        const parsed = JSON.parse(savedFolders);
-        setFolders(parsed);
-      } catch (e) {
-        console.error("Failed to load folders", e);
-      }
+    // Subscribe to Items
+    const itemsQuery = query(
+      collection(db, 'users', user.uid, 'library'),
+      orderBy('timestamp', 'desc')
+    );
+    
+    const unsubscribeItems = onSnapshot(itemsQuery, (snapshot) => {
+      const loadedItems = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as LibraryItem[];
+      setItems(loadedItems);
+    });
+
+    // Subscribe to Folders
+    const foldersQuery = query(
+      collection(db, 'users', user.uid, 'folders'),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribeFolders = onSnapshot(foldersQuery, (snapshot) => {
+        const loadedFolders = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        })) as LibraryFolder[];
+        setFolders(loadedFolders);
+    });
+
+    return () => {
+      unsubscribeItems();
+      unsubscribeFolders();
+    };
+  }, [user]);
+
+  const addItem = async (itemData: Omit<LibraryItem, 'id' | 'timestamp'>) => {
+    if (!user) return;
+    try {
+      await addDoc(collection(db, 'users', user.uid, 'library'), {
+        ...itemData,
+        timestamp: Date.now()
+      });
+    } catch (error) {
+      console.error("Error adding document: ", error);
     }
-  }, []);
+  };
 
-  const addItem = (itemData: Omit<LibraryItem, 'id' | 'timestamp'>) => {
-    const newItem: LibraryItem = {
-      ...itemData,
-      id: crypto.randomUUID(),
-      timestamp: Date.now(),
-    };
-    setItems((prev) => {
-      const newItems = [newItem, ...prev];
-      localStorage.setItem('shivuk_library', JSON.stringify(newItems));
-      return newItems;
+  const removeItem = async (id: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'users', user.uid, 'library', id));
+    } catch (error) {
+      console.error("Error deleting document: ", error);
+    }
+  };
+
+  const clearLibrary = async () => {
+    if (!user) return;
+    // Batch delete is recommended for production but loop is fine for small scale/MVP
+    items.forEach(async (item) => {
+        await removeItem(item.id);
     });
   };
 
-  const removeItem = (id: string) => {
-    setItems((prev) => {
-      const newItems = prev.filter((item) => item.id !== id);
-      localStorage.setItem('shivuk_library', JSON.stringify(newItems));
-      return newItems;
-    });
+  const createFolder = async (name: string, brandId?: string) => {
+    if (!user) return;
+    try {
+        await addDoc(collection(db, 'users', user.uid, 'folders'), {
+            name,
+            brandId,
+            createdAt: Date.now()
+        });
+    } catch (error) {
+        console.error("Error creating folder: ", error);
+    }
   };
 
-  const clearLibrary = () => {
-    setItems([]);
-    setFolders([]);
-    localStorage.removeItem('shivuk_library');
-    localStorage.removeItem('shivuk_library_folders');
-  };
-
-  const createFolder = (name: string, brandId?: string) => {
-    const newFolder: LibraryFolder = {
-      id: crypto.randomUUID(),
-      name,
-      brandId,
-      createdAt: Date.now()
-    };
-    setFolders(prev => {
-      const updated = [...prev, newFolder];
-      localStorage.setItem('shivuk_library_folders', JSON.stringify(updated));
-      return updated;
-    });
-  };
-
-  const deleteFolder = (id: string) => {
-    setFolders(prev => {
-      const updated = prev.filter(f => f.id !== id);
-      localStorage.setItem('shivuk_library_folders', JSON.stringify(updated));
-      return updated;
-    });
-    // Optional: Move items inside this folder back to root or delete them?
-    // Current behavior: Items remain but folderId points to nothing (effectively root or orphan)
+  const deleteFolder = async (id: string) => {
+    if (!user) return;
+    try {
+        await deleteDoc(doc(db, 'users', user.uid, 'folders', id));
+    } catch (error) {
+        console.error("Error deleting folder: ", error);
+    }
   };
 
   return (

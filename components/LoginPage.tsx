@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   Lock, 
@@ -10,18 +9,24 @@ import {
   ShieldCheck, 
   ChevronLeft,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Logo } from './Logo';
-
-interface LoginPageProps {
-  onLogin: () => void;
-}
+import { auth } from '../config/firebase';
+import { 
+    signInWithEmailAndPassword, 
+    createUserWithEmailAndPassword, 
+    signInWithPopup, 
+    GoogleAuthProvider, 
+    sendPasswordResetEmail,
+    AuthError
+} from 'firebase/auth';
 
 type ViewMode = 'login' | 'register' | 'forgot';
 
-export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
+export const LoginPage: React.FC = () => {
   const [view, setView] = useState<ViewMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -39,29 +44,32 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
     setConfirmPassword('');
   }, [view]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const getErrorMessage = (err: AuthError) => {
+      switch (err.code) {
+          case 'auth/invalid-credential': return 'E-mail ou senha incorretos.';
+          case 'auth/user-not-found': return 'Usuário não encontrado.';
+          case 'auth/wrong-password': return 'Senha incorreta.';
+          case 'auth/email-already-in-use': return 'Este e-mail já está em uso.';
+          case 'auth/weak-password': return 'A senha é muito fraca.';
+          case 'auth/invalid-email': return 'E-mail inválido.';
+          default: return `Erro: ${err.message}`;
+      }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    
-    const stored = localStorage.getItem('shivuk_auth');
-    if (!stored) {
-      setError('Usuário não encontrado. Por favor, crie uma conta.');
-      return;
-    }
-
+    setIsSubmitting(true);
     try {
-      const userData = JSON.parse(stored);
-      if (userData.email.toLowerCase() === email.toLowerCase() && userData.password === password) {
-        onLogin();
-      } else {
-        setError('E-mail ou senha incorretos.');
-      }
-    } catch (err) {
-      setError('Erro ao processar login. Tente novamente.');
+        await signInWithEmailAndPassword(auth, email, password);
+    } catch (err: any) {
+        setError(getErrorMessage(err));
+    } finally {
+        setIsSubmitting(false);
     }
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -70,25 +78,38 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
       return;
     }
 
-    if (password.length < 6) {
-      setError('A senha deve ter no mínimo 6 caracteres.');
-      return;
+    setIsSubmitting(true);
+    try {
+        await createUserWithEmailAndPassword(auth, email, password);
+    } catch (err: any) {
+        setError(getErrorMessage(err));
+    } finally {
+        setIsSubmitting(false);
     }
-
-    const userData = { email, password };
-    localStorage.setItem('shivuk_auth', JSON.stringify(userData));
-    onLogin();
   };
 
-  const handleForgot = (e: React.FormEvent) => {
+  const handleGoogleLogin = async () => {
+      setError('');
+      try {
+          const provider = new GoogleAuthProvider();
+          await signInWithPopup(auth, provider);
+      } catch (err: any) {
+          setError(getErrorMessage(err));
+      }
+  };
+
+  const handleForgot = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      setSuccess('Se o e-mail estiver em nossa base, você receberá instruções de recuperação em instantes.');
-      setIsSubmitting(false);
-    }, 1200);
+    try {
+        await sendPasswordResetEmail(auth, email);
+        setSuccess('Instruções enviadas para seu e-mail.');
+        setTimeout(() => setView('login'), 3000);
+    } catch (err: any) {
+        setError(getErrorMessage(err));
+    } finally {
+        setIsSubmitting(false);
+    }
   };
 
   return (
@@ -203,10 +224,33 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
                 <button 
                   type="submit"
-                  className="w-full py-5 bg-gradient-to-r from-cyber-indigo to-cyber-electric text-white rounded-2xl font-black uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-xl shadow-cyber-indigo/20 hover:opacity-95 active:scale-[0.98] transition-all mt-4"
+                  disabled={isSubmitting}
+                  className="w-full py-5 bg-gradient-to-r from-cyber-indigo to-cyber-electric text-white rounded-2xl font-black uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-xl shadow-cyber-indigo/20 hover:opacity-95 active:scale-[0.98] transition-all mt-4 disabled:opacity-50"
                 >
-                  Entrar no Estúdio
-                  <ArrowRight size={20} />
+                  {isSubmitting ? <Loader2 size={20} className="animate-spin" /> : <>Entrar no Estúdio <ArrowRight size={20} /></>}
+                </button>
+
+                <div className="relative my-6">
+                    <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-white/10"></div>
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                        <span className="bg-cyber-dark px-2 text-slate-500">ou continue com</span>
+                    </div>
+                </div>
+
+                <button 
+                    type="button"
+                    onClick={handleGoogleLogin}
+                    className="w-full py-4 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-2xl font-bold flex items-center justify-center gap-3 transition-all active:scale-[0.98]"
+                >
+                    <svg className="w-5 h-5" viewBox="0 0 24 24">
+                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.26.81-.58z" fill="#FBBC05"/>
+                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                    </svg>
+                    Google Account
                 </button>
 
                 <p className="text-center text-xs text-slate-500 pt-4">
@@ -274,10 +318,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
                 <button 
                   type="submit"
-                  className="w-full py-5 bg-gradient-to-r from-cyber-indigo to-cyber-electric text-white rounded-2xl font-black uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-xl shadow-cyber-indigo/20 mt-4 active:scale-[0.98] transition-all"
+                  disabled={isSubmitting}
+                  className="w-full py-5 bg-gradient-to-r from-cyber-indigo to-cyber-electric text-white rounded-2xl font-black uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-xl shadow-cyber-indigo/20 mt-4 active:scale-[0.98] transition-all disabled:opacity-50"
                 >
-                  Cadastrar e Entrar
-                  <UserPlus size={20} />
+                  {isSubmitting ? <Loader2 size={20} className="animate-spin" /> : <>Cadastrar e Entrar <UserPlus size={20} /></>}
                 </button>
 
                 <button 
@@ -322,8 +366,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                   disabled={isSubmitting || !!success}
                   className="w-full py-5 bg-cyber-indigo text-white rounded-2xl font-black uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-xl shadow-cyber-indigo/20 disabled:opacity-50 active:scale-[0.98] transition-all"
                 >
-                  {isSubmitting ? 'Processando...' : 'Enviar Link'}
-                  <ShieldCheck size={20} />
+                  {isSubmitting ? <Loader2 size={20} className="animate-spin" /> : <>Enviar Link <ShieldCheck size={20} /></>}
                 </button>
 
                 <button 
