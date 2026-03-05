@@ -52,6 +52,7 @@ export const LoginPage: React.FC = () => {
           case 'auth/email-already-in-use': return 'Este e-mail já está em uso.';
           case 'auth/weak-password': return 'A senha é muito fraca.';
           case 'auth/invalid-email': return 'E-mail inválido.';
+          case 'auth/unauthorized-domain': return 'Domínio não autorizado. Adicione este domínio no Firebase Console.';
           default: return `Erro: ${err.message}`;
       }
   };

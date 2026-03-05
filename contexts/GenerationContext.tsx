@@ -132,7 +132,6 @@ export function GenerationProvider({ children }: { children?: ReactNode }) {
          if (!currentImage) throw new Error("Image Required for Caption Mode");
          const data = await generateImageCaption(currentImage, currentPrompt);
          
-         // Blocking save to library
          await addItem({ 
              ...data, 
              brandName: brand.name, 
@@ -152,7 +151,6 @@ export function GenerationProvider({ children }: { children?: ReactNode }) {
         const fullPrompt = `MARCA: ${brand.name}. PERSONA: ${persona.label}. ESTILO: ${style}. PEDIDO: ${currentPrompt}`;
         const data = await generatePostContent(fullPrompt, currentImage);
         
-        // Blocking save to library to ensure image upload completes
         await addItem({ 
             ...data, 
             brandName: brand.name, 

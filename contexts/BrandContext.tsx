@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { db, storage } from '../config/firebase';
+import { db } from '../config/firebase';
 import { useAuth } from './AuthContext';
 import { 
   collection, 
@@ -11,7 +11,6 @@ import {
   query, 
   orderBy
 } from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 
 interface BrandColors {
   primary: string;
@@ -152,34 +151,9 @@ export const BrandProvider = ({ children }: { children?: React.ReactNode }) => {
 
   const updateBrand = async (id: string, updates: Partial<Brand>) => {
     if (!user) return;
-    
-    // Logic to handle image uploads for 'logo' and 'savedLogos'
-    const finalUpdates = { ...updates };
-    
     try {
-        // Upload logo if base64
-        if (finalUpdates.logo && finalUpdates.logo.startsWith('data:')) {
-             const logoRef = ref(storage, `users/${user.uid}/brands/${id}/logo_${Date.now()}.png`);
-             await uploadString(logoRef, finalUpdates.logo, 'data_url');
-             finalUpdates.logo = await getDownloadURL(logoRef);
-        }
-
-        // Upload savedLogos items if they are base64
-        // Note: This logic assumes new logos are added to the beginning of the array as per BrandsPage.tsx
-        if (finalUpdates.savedLogos && finalUpdates.savedLogos.length > 0) {
-             const newSavedLogos = await Promise.all(finalUpdates.savedLogos.map(async (logoStr) => {
-                 if (logoStr.startsWith('data:')) {
-                     const logoRef = ref(storage, `users/${user.uid}/brands/${id}/saved_${Date.now()}_${Math.random().toString(36).substr(2,5)}.png`);
-                     await uploadString(logoRef, logoStr, 'data_url');
-                     return await getDownloadURL(logoRef);
-                 }
-                 return logoStr; // Already a URL
-             }));
-             finalUpdates.savedLogos = newSavedLogos;
-        }
-
         // Firestore update
-        await updateDoc(doc(db, 'users', user.uid, 'brands', id), finalUpdates);
+        await updateDoc(doc(db, 'users', user.uid, 'brands', id), updates);
     } catch (error) {
         console.error("Error updating brand: ", error);
     }

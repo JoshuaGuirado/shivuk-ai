@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { LibraryItem, LibraryFolder } from '../types';
-import { db, storage } from '../config/firebase';
+import { db } from '../config/firebase';
 import { useAuth } from './AuthContext';
 import { 
   collection, 
@@ -11,7 +11,6 @@ import {
   query, 
   orderBy
 } from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 
 interface LibraryContextType {
   items: LibraryItem[];
@@ -85,38 +84,13 @@ export const LibraryProvider = ({ children }: { children?: React.ReactNode }) =>
         console.error("Cannot add item: No user logged in");
         return;
     }
-
-    let finalImageUrl = itemData.imageUrl;
-
-    // Handle Image Upload to Storage if Base64
-    if (finalImageUrl && finalImageUrl.startsWith('data:')) {
-        try {
-            const fileName = `library/${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
-            const storageRef = ref(storage, `users/${user.uid}/${fileName}`);
-            
-            // Upload
-            await uploadString(storageRef, finalImageUrl, 'data_url');
-            
-            // Get URL
-            finalImageUrl = await getDownloadURL(storageRef);
-        } catch (storageError) {
-            console.error("Error uploading to storage:", storageError);
-            // Fallback: try to save keeping null if upload fails to avoid firestore crash
-            // or keep base64 if small (risk)
-        }
-    }
-
     try {
       await addDoc(collection(db, 'users', user.uid, 'library'), {
         ...itemData,
-        imageUrl: finalImageUrl,
         timestamp: Date.now()
       });
     } catch (error) {
       console.error("Error adding document to library: ", error);
-      if (error.toString().includes("exceeded")) {
-          alert("Erro: O item é muito grande para salvar. Tente uma imagem menor.");
-      }
     }
   };
 
